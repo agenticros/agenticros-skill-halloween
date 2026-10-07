@@ -1,0 +1,80 @@
+{
+  "name": "@agenticros/halloween",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Creep or Treat — a stationary AgenticROS porch host. RealSense depth and approach speed make the robot talk or scream while the candy bowl stays at its feet.",
+  "keywords": [
+    "agenticros",
+    "ros2",
+    "robotics",
+    "halloween",
+    "realsense",
+    "depth",
+    "audio",
+    "human-interaction"
+  ],
+  "homepage": "https://github.com/chrismatthieu/agenticros-skill-halloween#readme",
+  "bugs": {
+    "url": "https://github.com/chrismatthieu/agenticros-skill-halloween/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chrismatthieu/agenticros-skill-halloween.git"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "assets",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc && node --test test/*.test.mjs",
+    "prepublishOnly": "npm run build"
+  },
+  "agenticros": {
+    "id": "halloween",
+    "displayName": "Creep or Treat",
+    "description": "Stationary porch host. Talks or screams from RealSense proximity and approach speed while a candy bowl sits at the robot's feet. Never drives.",
+    "categories": [
+      "human-interaction",
+      "audio",
+      "vision"
+    ],
+    "capabilities": [
+      {
+        "id": "host_trick_or_treat",
+        "verb": "host",
+        "tool": "start_haunt",
+        "description": "Stand still and speak or scream as kids approach the candy bowl, using depth and approach speed. Does not move the base.",
+        "interruptible": true,
+        "blocks_base": false,
+        "requires": ["camera", "depth"],
+        "optional": ["audio"],
+        "inputs": {},
+        "outputs": {
+          "ok": { "type": "boolean", "description": "True when the haunt loop is running after the call." }
+        }
+      }
+    ]
+  },
+  "dependencies": {
+    "@agenticros/core": "^0.8.0",
+    "@sinclair/typebox": "^0.34.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.0",
+    "typescript": "^5.7.0"
+  },
+  "author": "chrismatthieu",
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

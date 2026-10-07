@@ -1,0 +1,129 @@
+# Creep or Treat
+
+Stationary Halloween host for [AgenticROS](https://github.com/agenticros/agenticros). The robot stays plugged in and does not drive. A candy bowl sits at its feet. The RealSense depth camera watches the walk-up: distance picks the line, and approach speed picks a creep, a normal voice, or a scream.
+
+```bash
+npx agenticros skills install @agenticros/halloween
+```
+
+Until the package is published, load it from this directory (see [Install](#install)).
+
+## What a kid hears
+
+The loop samples depth a few times a second. One approach is one visit. The closest person wins when several kids bunch up.
+
+| Zone | Distance | What it does |
+|---|---|---|
+| Idle | nothing, or beyond ~2.5 m | Quiet. A mutter about every 35 s: "The bowl is waiting." |
+| Notice | ~1.6–2.5 m | Greeting. A creep is a quiet gasp. A walk is a normal hello. Left or right gets "On my left" or "On my right." |
+| Closing | ~0.8–1.6 m | Still watching. A rush here screams once. |
+| Bowl | ~0.4–0.8 m, held about a second | "Take one from the bowl at my feet." |
+| Lens | under ~0.4 m | A scream, then "The candy is at my feet, not my face." |
+
+Speed while they are closing:
+
+- **Creep** — under ~0.25 m/s. Slow, higher, quieter.
+- **Walk** — between a creep and a rush.
+- **Rush** — over ~0.6 m/s. Plays `assets/scream.wav`, then one line. Once per visit.
+
+Backing out past the notice zone ends the visit ("Happy haunting.", or "Yeah. Run." after a scream). The next kid can start a new one.
+
+Ordinary lines wait about 2.5 s apart. Screams, the first greeting, and the goodbye skip that wait.
+
+## Aim the camera over the bowl
+
+`getDepthSectors` is three vertical strips of the depth image. A bowl in the frame looks like a child who never leaves, and the robot will scream at the candy.
+
+Tilt the RealSense down enough to see torsos on the walk-up, with the bowl below the bottom of the image. An empty porch should read as idle (no return inside the notice distance).
+
+If the empty porch still reports a near distance, raise `minValidM` above that reading so the bowl is ignored. Do that only if the bowl is closer than the kids will stand. Lens reactions need some valid readings inside 0.4 m, so a high `minValidM` turns the lens zone off.
+
+## Install
+
+Speech plays on the computer running the OpenClaw gateway. Run the gateway on the robot so the speaker is the robot's.
+
+```bash
+sudo apt install espeak-ng alsa-utils
+# espeak-ng is the voice. alsa-utils provides aplay for the scream.
+```
+
+On a Mac gateway, `espeak-ng` (Homebrew) and `afplay` work. `afplay` is already on macOS.
+
+Build and register this checkout:
+
+```bash
+cd agenticros-skill-halloween
+npm install
+npm run build
+npx agenticros skills add halloween
+npx agenticros skills sync
+```
+
+Or point `skillPaths` at this directory and restart the gateway.
+
+```jsonc
+{
+  "plugins": {
+    "entries": {
+      "agenticros": {
+        "config": {
+          "skillPaths": ["/absolute/path/to/agenticros-skill-halloween"],
+          "skills": {
+            "halloween": {
+              "depthTopic": "/camera/camera/depth/image_rect_raw"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+In chat: "Start the haunt." / "Stop haunting." / "How many kids?"
+
+The tools are `start_haunt`, `stop_haunt`, and `haunt_status`. The capability id is `host_trick_or_treat` (verb `host`). It requires `camera` and `depth`. It does not require `base` or `arm`, and it never publishes `cmd_vel`.
+
+## First night
+
+Stand on the sidewalk, then creep in, walk in, run in, and lean toward the camera. The distances and the two speed thresholds are the knobs that matter. `haunt_status` shows the live zone, speed, visitor count, and last line.
+
+If it screams at an empty porch, the bowl is in frame.
+
+## Config (`config.skills.halloween`)
+
+| Option | Default | Description |
+|---|---|---|
+| `depthTopic` | `/camera/camera/depth/image_rect_raw` | RealSense depth image. |
+| `rateHz` | `5` | Sample rate. |
+| `depthTimeoutMs` | `1000` | Wait for one depth message. |
+| `noticeM` | `2.5` | Greeting starts inside this. |
+| `closingM` | `1.6` | Inside notice, outside the bowl. |
+| `bowlM` | `0.8` | Standing at the bowl. |
+| `lensM` | `0.4` | Leaning into the camera. |
+| `minValidM` | `0.28` | Ignore nearer returns (bowl, floor, speckle). |
+| `maxValidM` | `4` | Ignore farther returns. |
+| `creepMaxMps` | `0.25` | Closing speed at or under this creeps. |
+| `rushMinMps` | `0.6` | Closing speed at or over this screams. |
+| `bowlHoldMs` | `1000` | How long they must hold at the bowl before the treat line. |
+| `cooldownMs` | `2500` | Gap between ordinary lines. |
+| `idleIntervalMs` | `35000` | Mutter period when nobody is there. |
+| `espeakBin` | `espeak-ng` | TTS binary on the gateway machine. |
+| `playerBin` | auto | `paplay`, `aplay`, or `afplay`. |
+| `screamWav` | bundled | Override the scream. |
+| `gaspWav` | bundled | Override the quiet arrival sound. |
+
+If `noticeM`, `closingM`, `bowlM`, and `lensM` are out of order, the skill falls back to the defaults above.
+
+## Develop
+
+```bash
+npm install
+npm test
+```
+
+The zone machine is pure and covered without a camera or a speaker. `npm test` builds first, then runs `test/*.test.mjs`.
+
+## License
+
+Apache-2.0
