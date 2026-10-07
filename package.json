@@ -14,13 +14,13 @@
     "audio",
     "human-interaction"
   ],
-  "homepage": "https://github.com/chrismatthieu/agenticros-skill-halloween#readme",
+  "homepage": "https://github.com/agenticros/agenticros-skill-halloween#readme",
   "bugs": {
-    "url": "https://github.com/chrismatthieu/agenticros-skill-halloween/issues"
+    "url": "https://github.com/agenticros/agenticros-skill-halloween/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/chrismatthieu/agenticros-skill-halloween.git"
+    "url": "git+https://github.com/agenticros/agenticros-skill-halloween.git"
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
