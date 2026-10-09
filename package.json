@@ -28,7 +28,8 @@
     "dist",
     "assets",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "scripts"
   ],
   "scripts": {
     "build": "tsc",

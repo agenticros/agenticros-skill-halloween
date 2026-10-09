@@ -3,6 +3,8 @@
  * This skill does not publish cmd_vel. The robot stays on wall power.
  */
 
+import fs from "node:fs";
+import path from "node:path";
 import type { AgenticROSConfig } from "@agenticros/core";
 import type { RosTransport } from "@agenticros/core";
 import { getHalloweenConfig, type HalloweenConfig } from "./config.js";
@@ -19,6 +21,23 @@ import { PersonWatch } from "./person-watch.js";
 import { closestSector, type Side } from "./range.js";
 import type { SkillContext } from "./types.js";
 import { createSpeaker, type Speaker } from "./voice.js";
+
+/** Prefer the skillPaths checkout over OpenClaw's scripts-less capture tree. */
+function resolveHalloweenSkillRoot(config: AgenticROSConfig): string | undefined {
+  const paths = config.skillPaths ?? [];
+  for (const raw of paths) {
+    const root = path.resolve(String(raw));
+    const pkgPath = path.join(root, "package.json");
+    if (!fs.existsSync(pkgPath)) continue;
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { name?: string };
+      if (pkg.name === "@agenticros/halloween") return root;
+    } catch {
+      // keep scanning
+    }
+  }
+  return undefined;
+}
 
 const DEFAULT_COLOR_TOPIC = "/camera/camera/color/image_raw/compressed";
 
@@ -221,9 +240,8 @@ export function startHaunt(config: AgenticROSConfig, context: SkillContext): str
       personHz: halloween.personHz,
       missTicks: halloween.personMissTicks,
       logger: context.logger,
-      // Host plugin loaders keep onnxruntime-node/sharp inside OpenClaw admission.
-      loadObjectDetection: context.importObjectDetection,
       loadRosCamera: context.importRosCamera,
+      skillRoot: resolveHalloweenSkillRoot(config),
     });
     personWatch = watch;
     void watch.start(transport).catch((err) => {

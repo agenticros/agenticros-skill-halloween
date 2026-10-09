@@ -4,8 +4,8 @@
  *
  * Under OpenClaw, in-process onnxruntime-node/sharp are remapped to other
  * plugins' native admissions and fail. Detection runs in a short-lived Node
- * child that loads ~/.agenticros/plugin-deploy natives with a clean module
- * graph (see object-detection/scripts/detect-person.mjs).
+ * child (scripts/detect-person.mjs) that loads plugin-deploy / monorepo
+ * @agenticros/object-detection with a clean module graph.
  */
 
 import { spawn } from "node:child_process";
@@ -25,9 +25,14 @@ export interface PersonWatchOptions {
   /** Consecutive misses before presence clears. */
   missTicks: number;
   logger: { info(msg: string): void; warn(msg: string): void; error(msg: string): void };
-  /** Host-plugin loaders (OpenClaw). Used for ros-camera; OD uses subprocess. */
-  loadObjectDetection?: () => Promise<unknown>;
+  /** Optional host-plugin ros-camera loader; OD always uses subprocess. */
   loadRosCamera?: () => Promise<unknown>;
+  /**
+   * Absolute path to the skill checkout (skillPaths entry). OpenClaw often
+   * loads a capture copy under ~/.openclaw/tmp/plugin-captures/... that omits
+   * scripts/; when set, detect-person.mjs is resolved from this root first.
+   */
+  skillRoot?: string;
 }
 
 export interface PersonWatchStatus {
@@ -103,27 +108,49 @@ async function loadRosCamera(opts: PersonWatchOptions): Promise<RosCameraMod> {
   return loadWorkspacePackage<RosCameraMod>("@agenticros/ros-camera", "ros-camera");
 }
 
-function findDetectScript(): string {
-  const home = process.env["HOME"] ?? os.homedir();
-  const candidates = [
-    path.join(
-      home,
-      ".agenticros/plugin-deploy/node_modules/@agenticros/object-detection/scripts/detect-person.mjs",
-    ),
-    path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "../../agenticros/packages/object-detection/scripts/detect-person.mjs",
-    ),
-    path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "../node_modules/@agenticros/object-detection/scripts/detect-person.mjs",
-    ),
-  ];
+function findDetectScript(skillRoot?: string): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const candidates: string[] = [];
+  const push = (p: string | undefined) => {
+    if (p && !candidates.includes(p)) candidates.push(p);
+  };
+  // Prefer the real skillPaths checkout — OpenClaw capture trees often omit scripts/.
+  if (skillRoot) {
+    push(path.resolve(skillRoot, "scripts/detect-person.mjs"));
+    push(path.resolve(skillRoot, "dist/scripts/detect-person.mjs"));
+  }
+  if (process.env["AGENTICROS_HALLOWEEN_ROOT"]) {
+    push(path.resolve(process.env["AGENTICROS_HALLOWEEN_ROOT"], "scripts/detect-person.mjs"));
+  }
+  // Built skill / capture: dist/ -> ../scripts/ (and dist/scripts/ copy)
+  push(path.resolve(here, "../scripts/detect-person.mjs"));
+  push(path.resolve(here, "scripts/detect-person.mjs"));
+  push(path.resolve(here, "../../scripts/detect-person.mjs"));
+  // Walk up from this module looking for package.json of @agenticros/halloween.
+  let dir = here;
+  for (let i = 0; i < 6; i++) {
+    const pkgPath = path.join(dir, "package.json");
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8")) as { name?: string };
+        if (pkg.name === "@agenticros/halloween") {
+          push(path.join(dir, "scripts/detect-person.mjs"));
+          push(path.join(dir, "dist/scripts/detect-person.mjs"));
+          break;
+        }
+      } catch {
+        // ignore malformed package.json while searching
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
   }
   throw new Error(
-    `detect-person.mjs not found. Looked in plugin-deploy and workspace object-detection packages.`,
+    `detect-person.mjs not found next to this skill (import.meta.url=${import.meta.url}; tried: ${candidates.join(", ")}).`,
   );
 }
 
@@ -150,13 +177,15 @@ const TINY_JPEG = Buffer.from(
 class SubprocessPersonDetector implements Detector {
   private script = "";
   private scoreThreshold: number;
+  private skillRoot?: string;
 
-  constructor(opts?: { scoreThreshold?: number }) {
+  constructor(opts?: { scoreThreshold?: number; skillRoot?: string }) {
     this.scoreThreshold = opts?.scoreThreshold ?? 0.4;
+    this.skillRoot = opts?.skillRoot;
   }
 
   async load(): Promise<void> {
-    this.script = findDetectScript();
+    this.script = findDetectScript(this.skillRoot);
     // Warm model + verify natives outside OpenClaw's remap.
     await this.detect(TINY_JPEG);
   }
@@ -166,7 +195,7 @@ class SubprocessPersonDetector implements Detector {
     height: number;
     persons: PersonDetection[];
   }> {
-    const script = this.script || findDetectScript();
+    const script = this.script || findDetectScript(this.skillRoot);
     const vips = sharpLibvipsDir();
     const env = { ...process.env };
     if (vips) {
@@ -258,6 +287,7 @@ export class PersonWatch {
     // smoke tests (same deploy script).
     this.detector = new SubprocessPersonDetector({
       scoreThreshold: this.opts.scoreThreshold,
+      skillRoot: this.opts.skillRoot,
     });
     await this.detector.load({ download: true });
     this.ready = true;
