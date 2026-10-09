@@ -1,6 +1,6 @@
 {
   "name": "@agenticros/halloween",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Creep or Treat — a stationary AgenticROS porch host. YOLOv8n person detection plus RealSense depth/approach speed make the robot talk or scream while a candy bowl stays at its feet.",
   "keywords": [
@@ -53,17 +53,25 @@
         "description": "Stand still and speak or scream as kids approach the candy bowl. Uses YOLOv8n person detection plus RealSense depth/approach speed. Does not move the base.",
         "interruptible": true,
         "blocks_base": false,
-        "requires": ["camera", "depth"],
-        "optional": ["audio"],
+        "requires": [
+          "camera",
+          "depth"
+        ],
+        "optional": [
+          "audio"
+        ],
         "inputs": {},
         "outputs": {
-          "ok": { "type": "boolean", "description": "True when the haunt loop is running after the call." }
+          "ok": {
+            "type": "boolean",
+            "description": "True when the haunt loop is running after the call."
+          }
         }
       }
     ]
   },
   "dependencies": {
-    "@agenticros/core": "file:../agenticros/packages/core",
+    "@agenticros/core": "^0.8.14",
     "@sinclair/typebox": "^0.34.0"
   },
   "devDependencies": {
