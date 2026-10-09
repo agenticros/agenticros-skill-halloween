@@ -2,7 +2,7 @@
  * AgenticROS Creep or Treat skill.
  * Tools: start_haunt, stop_haunt, haunt_status.
  * Config: config.skills.halloween
- * The robot does not move. Speech follows RealSense proximity and approach speed.
+ * The robot does not move. YOLO gates visits; depth/approach speed pick the line.
  */
 
 import type { AgenticROSConfig } from "@agenticros/core";

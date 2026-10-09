@@ -2,13 +2,14 @@
   "name": "@agenticros/halloween",
   "version": "0.1.0",
   "type": "module",
-  "description": "Creep or Treat — a stationary AgenticROS porch host. RealSense depth and approach speed make the robot talk or scream while the candy bowl stays at its feet.",
+  "description": "Creep or Treat — a stationary AgenticROS porch host. YOLOv8n person detection plus RealSense depth/approach speed make the robot talk or scream while a candy bowl stays at its feet.",
   "keywords": [
     "agenticros",
     "ros2",
     "robotics",
     "halloween",
     "realsense",
+    "yolo",
     "depth",
     "audio",
     "human-interaction"
@@ -38,7 +39,7 @@
   "agenticros": {
     "id": "halloween",
     "displayName": "Creep or Treat",
-    "description": "Stationary porch host. Talks or screams from RealSense proximity and approach speed while a candy bowl sits at the robot's feet. Never drives.",
+    "description": "Stationary porch host. Greets only when YOLO sees a person; depth and approach speed pick the line. Candy bowl at the feet. Never drives.",
     "categories": [
       "human-interaction",
       "audio",
@@ -49,7 +50,7 @@
         "id": "host_trick_or_treat",
         "verb": "host",
         "tool": "start_haunt",
-        "description": "Stand still and speak or scream as kids approach the candy bowl, using depth and approach speed. Does not move the base.",
+        "description": "Stand still and speak or scream as kids approach the candy bowl. Uses YOLOv8n person detection plus RealSense depth/approach speed. Does not move the base.",
         "interruptible": true,
         "blocks_base": false,
         "requires": ["camera", "depth"],
@@ -62,10 +63,12 @@
     ]
   },
   "dependencies": {
-    "@agenticros/core": "^0.8.0",
+    "@agenticros/core": "file:../agenticros/packages/core",
     "@sinclair/typebox": "^0.34.0"
   },
   "devDependencies": {
+    "@agenticros/object-detection": "file:../agenticros/packages/object-detection",
+    "@agenticros/ros-camera": "file:../agenticros/packages/ros-camera",
     "@types/node": "^20.17.0",
     "typescript": "^5.7.0"
   },

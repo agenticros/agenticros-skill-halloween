@@ -37,6 +37,12 @@ export interface SkillContext {
     topic: string,
     timeoutMs?: number,
   ): Promise<DepthSectorsResult>;
+  /**
+   * Prefer these over skill-local file imports of YOLO/camera packages.
+   * OpenClaw only admits onnxruntime-node/sharp through the host plugin graph.
+   */
+  importObjectDetection?: () => Promise<unknown>;
+  importRosCamera?: () => Promise<unknown>;
   logger: { info(msg: string): void; warn(msg: string): void; error(msg: string): void };
 }
 

@@ -1,11 +1,12 @@
 /**
- * Depth loop for Creep or Treat. Samples RealSense sectors and speaks.
+ * Depth + YOLO person loop for Creep or Treat. Samples RealSense sectors and speaks.
  * This skill does not publish cmd_vel. The robot stays on wall power.
  */
 
 import type { AgenticROSConfig } from "@agenticros/core";
 import type { RosTransport } from "@agenticros/core";
 import { getHalloweenConfig, type HalloweenConfig } from "./config.js";
+import { gateDepthWithPerson } from "./gate.js";
 import { halloweenLines } from "./lines.js";
 import {
   initialHauntState,
@@ -14,9 +15,12 @@ import {
   type SpeedBand,
   type Zone,
 } from "./engine.js";
+import { PersonWatch } from "./person-watch.js";
 import { closestSector, type Side } from "./range.js";
 import type { SkillContext } from "./types.js";
 import { createSpeaker, type Speaker } from "./voice.js";
+
+const DEFAULT_COLOR_TOPIC = "/camera/camera/color/image_raw/compressed";
 
 export interface HauntStatus {
   running: boolean;
@@ -28,18 +32,24 @@ export interface HauntStatus {
   inVisit: boolean;
   visitorCount: number;
   lastLine: string;
+  person: boolean;
+  personReady: boolean;
+  requirePerson: boolean;
 }
 
 let generation = 0;
 let loopInterval: ReturnType<typeof setInterval> | null = null;
 let tickInProgress = false;
 let speaker: Speaker | null = null;
+let personWatch: PersonWatch | null = null;
 let hauntState: HauntState = initialHauntState();
+let activeConfig: HalloweenConfig | null = null;
 let lensSince: number | null = null;
 let warnedBowl = false;
 let lastDepthWarnMs = 0;
 
 export function getHauntStatus(): HauntStatus {
+  const watch = personWatch?.status();
   return {
     running: loopInterval != null,
     zone: hauntState.zone,
@@ -50,6 +60,9 @@ export function getHauntStatus(): HauntStatus {
     inVisit: hauntState.inVisit,
     visitorCount: hauntState.visitorCount,
     lastLine: hauntState.lastLine,
+    person: watch?.present ?? false,
+    personReady: watch?.ready ?? false,
+    requirePerson: activeConfig?.requirePerson ?? true,
   };
 }
 
@@ -63,7 +76,26 @@ export function formatHauntStatus(status: HauntStatus = getHauntStatus()): strin
     status.distanceM == null ? "nobody in range" : `${status.distanceM.toFixed(2)} m, ${status.zone}`;
   const speed = `${status.approachMps.toFixed(2)} m/s (${status.band})`;
   const last = status.lastLine ? ` Last line: "${status.lastLine}".` : "";
-  return `Creep or Treat is hosting. ${distance}. Approach ${speed}. Visitors: ${status.visitorCount}.${last}`;
+  let vision = "";
+  if (status.requirePerson) {
+    if (!status.personReady) vision = " YOLO warming up.";
+    else vision = status.person ? " Person: yes." : " Person: no.";
+  }
+  return `Creep or Treat is hosting. ${distance}. Approach ${speed}. Visitors: ${status.visitorCount}.${vision}${last}`;
+}
+
+function resolveCameraTopic(halloween: HalloweenConfig, config: AgenticROSConfig): string {
+  const fromSkill = halloween.cameraTopic.trim();
+  if (fromSkill) return fromSkill;
+  const fromRobot = (config.robot?.cameraTopic ?? "").trim();
+  if (fromRobot) {
+    // Prefer compressed when the configured topic is raw color.
+    if (fromRobot.endsWith("/image_raw") && !fromRobot.includes("compressed")) {
+      return `${fromRobot}/compressed`;
+    }
+    return fromRobot;
+  }
+  return DEFAULT_COLOR_TOPIC;
 }
 
 async function readDistance(
@@ -122,8 +154,10 @@ function runTick(
   void (async () => {
     try {
       if (runGeneration !== generation) return;
-      const reading = await readDistance(transport, config, context);
+      const depth = await readDistance(transport, config, context);
       if (runGeneration !== generation) return;
+      const presence = personWatch ? personWatch.presence() : null;
+      const reading = gateDepthWithPerson(depth, presence, config.requirePerson);
       const beforeZone = hauntState.zone;
       const result = tickHaunt(hauntState, { now: Date.now(), ...reading }, config, halloweenLines);
       hauntState = result.state;
@@ -176,21 +210,59 @@ export function startHaunt(config: AgenticROSConfig, context: SkillContext): str
   hauntState = initialHauntState(Date.now());
   lensSince = null;
   warnedBowl = false;
+  activeConfig = halloween;
   speaker = createSpeaker(halloween, context.logger);
+
+  const cameraTopic = resolveCameraTopic(halloween, config);
+  if (halloween.requirePerson) {
+    const watch = new PersonWatch({
+      cameraTopic,
+      scoreThreshold: halloween.personScoreThreshold,
+      personHz: halloween.personHz,
+      missTicks: halloween.personMissTicks,
+      logger: context.logger,
+      // Host plugin loaders keep onnxruntime-node/sharp inside OpenClaw admission.
+      loadObjectDetection: context.importObjectDetection,
+      loadRosCamera: context.importRosCamera,
+    });
+    personWatch = watch;
+    void watch.start(transport).catch((err) => {
+      const message = err instanceof Error ? err.message : String(err);
+      context.logger.warn(
+        `Creep or Treat: YOLO person detect failed (${message.slice(0, 400)}). Falling back to depth-only.`,
+      );
+      halloween.requirePerson = false;
+      activeConfig = halloween;
+      void watch.stop();
+      if (personWatch === watch) personWatch = null;
+    });
+  } else {
+    personWatch = null;
+  }
+
   const periodMs = 1000 / halloween.rateHz;
   loopInterval = setInterval(() => {
     if (runGeneration !== generation) return;
     runTick(transport, halloween, context, runGeneration);
   }, periodMs);
 
+  const vision = halloween.requirePerson
+    ? ` YOLO person gate on (${cameraTopic}, ${halloween.personHz} Hz).`
+    : " Depth-only (requirePerson=false).";
   context.logger.info(
-    `Creep or Treat started. depthTopic="${topic}", ${halloween.rateHz} Hz. The base will not move.`,
+    `Creep or Treat started. depthTopic="${topic}", ${halloween.rateHz} Hz.${vision} The base will not move.`,
   );
-  return "Creep or Treat is hosting. The robot stays still. Kids at the bowl will get a voice that creeps, talks, or screams from how they approach. Say stop when the night is over.";
+  return (
+    "Creep or Treat is hosting. The robot stays still. " +
+    (halloween.requirePerson
+      ? "It greets only when YOLO sees a person, using depth for distance and approach speed. "
+      : "Kids at the bowl will get a voice that creeps, talks, or screams from how they approach. ") +
+    "Say stop when the night is over."
+  );
 }
 
 export function stopHaunt(context: SkillContext): string {
-  if (!loopInterval && !speaker) return "Creep or Treat is already quiet.";
+  if (!loopInterval && !speaker && !personWatch) return "Creep or Treat is already quiet.";
   generation += 1;
   if (loopInterval) {
     clearInterval(loopInterval);
@@ -198,6 +270,10 @@ export function stopHaunt(context: SkillContext): string {
   }
   speaker?.stop();
   speaker = null;
+  const watch = personWatch;
+  personWatch = null;
+  void watch?.stop();
+  activeConfig = null;
   hauntState = {
     ...initialHauntState(Date.now()),
     visitorCount: hauntState.visitorCount,

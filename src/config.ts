@@ -43,6 +43,19 @@ export interface HalloweenConfig extends HauntTuning {
   minValidM: number;
   /** Ignore depth farther than this. */
   maxValidM: number;
+  /**
+   * Color camera for YOLO person detection. Empty uses robot.cameraTopic, then
+   * the RealSense compressed color topic.
+   */
+  cameraTopic: string;
+  /** When true, depth alone never starts a visit — a YOLO person is required. */
+  requirePerson: boolean;
+  /** YOLO confidence threshold (0..1). */
+  personScoreThreshold: number;
+  /** How often to run YOLO (kept lower than depth rateHz on Jetson). */
+  personHz: number;
+  /** Missed YOLO frames before presence clears. */
+  personMissTicks: number;
   espeakBin: string;
   /** Empty string picks paplay, aplay, or afplay. */
   playerBin: string;
@@ -77,11 +90,21 @@ const DEFAULTS: HalloweenConfig = {
   depthTimeoutMs: 1000,
   minValidM: 0.28,
   maxValidM: 4,
+  cameraTopic: "",
+  requirePerson: true,
+  personScoreThreshold: 0.45,
+  personHz: 1.5,
+  personMissTicks: 3,
   espeakBin: "espeak-ng",
   playerBin: "",
   screamWav: "",
   gaspWav: "",
 };
+
+function bool(source: Record<string, unknown>, key: string, fallback: boolean): boolean {
+  const value = source[key];
+  return typeof value === "boolean" ? value : fallback;
+}
 
 function num(source: Record<string, unknown>, key: string, fallback: number): number {
   const value = source[key];
@@ -103,6 +126,11 @@ export function getHalloweenConfig(skillsSlice: unknown): HalloweenConfig {
     depthTimeoutMs: num(source, "depthTimeoutMs", DEFAULTS.depthTimeoutMs),
     minValidM: num(source, "minValidM", DEFAULTS.minValidM),
     maxValidM: num(source, "maxValidM", DEFAULTS.maxValidM),
+    cameraTopic: str(source, "cameraTopic", DEFAULTS.cameraTopic),
+    requirePerson: bool(source, "requirePerson", DEFAULTS.requirePerson),
+    personScoreThreshold: num(source, "personScoreThreshold", DEFAULTS.personScoreThreshold),
+    personHz: num(source, "personHz", DEFAULTS.personHz),
+    personMissTicks: num(source, "personMissTicks", DEFAULTS.personMissTicks),
     noticeM: num(source, "noticeM", DEFAULTS.noticeM),
     closingM: num(source, "closingM", DEFAULTS.closingM),
     bowlM: num(source, "bowlM", DEFAULTS.bowlM),
@@ -125,6 +153,9 @@ export function getHalloweenConfig(skillsSlice: unknown): HalloweenConfig {
   };
 
   config.rateHz = Math.min(15, Math.max(1, config.rateHz));
+  config.personHz = Math.min(5, Math.max(0.5, config.personHz));
+  config.personScoreThreshold = Math.min(0.95, Math.max(0.1, config.personScoreThreshold));
+  config.personMissTicks = Math.max(1, Math.round(config.personMissTicks));
   config.samplesToArrive = Math.max(1, Math.round(config.samplesToArrive));
   config.idleTicksToEndVisit = Math.max(1, Math.round(config.idleTicksToEndVisit));
   config.holdMissTicks = Math.max(0, Math.round(config.holdMissTicks));

@@ -1,6 +1,6 @@
 # Creep or Treat
 
-Stationary Halloween host for [AgenticROS](https://github.com/agenticros/agenticros). The robot stays plugged in and does not drive. A candy bowl sits at its feet. The RealSense depth camera watches the walk-up: distance picks the line, and approach speed picks a creep, a normal voice, or a scream.
+Stationary Halloween host for [AgenticROS](https://github.com/agenticros/agenticros). The robot stays plugged in and does not drive. A candy bowl sits at its feet. **YOLOv8n** watches the color camera for a real person; RealSense depth then picks the line from distance and approach speed. Furniture and the candy bowl alone do not start a visit.
 
 ```bash
 npx agenticros skills install @agenticros/halloween
@@ -10,7 +10,7 @@ Until the package is published, load it from this directory (see [Install](#inst
 
 ## What a kid hears
 
-The loop samples depth a few times a second. One approach is one visit. The closest person wins when several kids bunch up.
+The loop runs YOLO on the color stream (~1.5 Hz) and samples depth a few times a second. Depth only counts while YOLO sees a person. One approach is one visit. The closest person wins when several kids bunch up.
 
 | Zone | Distance | What it does |
 |---|---|---|
@@ -32,11 +32,13 @@ Ordinary lines wait about 2.5 s apart. Screams, the first greeting, and the good
 
 ## Aim the camera over the bowl
 
-`getDepthSectors` is three vertical strips of the depth image. A bowl in the frame looks like a child who never leaves, and the robot will scream at the candy.
+With `requirePerson` (default **true**), YOLO must see a person before depth can start or continue a visit — so a bowl or chair in the depth image alone will not keep talking.
 
-Tilt the RealSense down enough to see torsos on the walk-up, with the bowl below the bottom of the image. An empty porch should read as idle (no return inside the notice distance).
+Still aim the RealSense so torsos are in the color frame and the candy bowl sits low or out of the depth image when you can. That keeps bowl/lens zones honest once a kid is close.
 
-If the empty porch still reports a near distance, raise `minValidM` above that reading so the bowl is ignored. Do that only if the bowl is closer than the kids will stand. Lens reactions need some valid readings inside 0.4 m, so a high `minValidM` turns the lens zone off.
+Under OpenClaw, YOLO runs in a short-lived Node child (`object-detection/scripts/detect-person.mjs`) so `onnxruntime-node` / `sharp` load from `~/.agenticros/plugin-deploy` instead of OpenClaw's remapped native admissions. The gateway needs sharp's libvips on `LD_LIBRARY_PATH` (written into `~/.agenticros/gateway-ros.env` by `setup_gateway_plugin.sh`).
+
+If YOLO cannot load, the skill logs a warning and falls back to depth-only. Set `requirePerson: false` to force that mode.
 
 ## Install
 
@@ -95,7 +97,12 @@ If it screams at an empty porch, the bowl is in frame.
 | Option | Default | Description |
 |---|---|---|
 | `depthTopic` | `/camera/camera/depth/image_rect_raw` | RealSense depth image. |
-| `rateHz` | `5` | Sample rate. |
+| `cameraTopic` | robot camera / compressed color | Color topic for YOLO (CompressedImage preferred). |
+| `requirePerson` | `true` | Only greet when YOLO sees a person. |
+| `personScoreThreshold` | `0.45` | Minimum YOLO confidence. |
+| `personHz` | `1.5` | YOLO rate (keep below depth `rateHz` on Jetson). |
+| `personMissTicks` | `3` | Missed YOLO frames before presence clears. |
+| `rateHz` | `5` | Depth sample rate. |
 | `depthTimeoutMs` | `1000` | Wait for one depth message. |
 | `noticeM` | `2.5` | Greeting starts inside this. |
 | `closingM` | `1.6` | Inside notice, outside the bowl. |
