@@ -221,8 +221,6 @@ export function startHaunt(config: AgenticROSConfig, context: SkillContext): str
       personHz: halloween.personHz,
       missTicks: halloween.personMissTicks,
       logger: context.logger,
-      // Host plugin loaders keep onnxruntime-node/sharp inside OpenClaw admission.
-      loadObjectDetection: context.importObjectDetection,
       loadRosCamera: context.importRosCamera,
     });
     personWatch = watch;

@@ -4,8 +4,8 @@
  *
  * Under OpenClaw, in-process onnxruntime-node/sharp are remapped to other
  * plugins' native admissions and fail. Detection runs in a short-lived Node
- * child that loads ~/.agenticros/plugin-deploy natives with a clean module
- * graph (see object-detection/scripts/detect-person.mjs).
+ * child (scripts/detect-person.mjs) that loads plugin-deploy / monorepo
+ * @agenticros/object-detection with a clean module graph.
  */
 
 import { spawn } from "node:child_process";
@@ -25,8 +25,7 @@ export interface PersonWatchOptions {
   /** Consecutive misses before presence clears. */
   missTicks: number;
   logger: { info(msg: string): void; warn(msg: string): void; error(msg: string): void };
-  /** Host-plugin loaders (OpenClaw). Used for ros-camera; OD uses subprocess. */
-  loadObjectDetection?: () => Promise<unknown>;
+  /** Optional host-plugin ros-camera loader; OD always uses subprocess. */
   loadRosCamera?: () => Promise<unknown>;
 }
 
@@ -104,26 +103,18 @@ async function loadRosCamera(opts: PersonWatchOptions): Promise<RosCameraMod> {
 }
 
 function findDetectScript(): string {
-  const home = process.env["HOME"] ?? os.homedir();
+  const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    path.join(
-      home,
-      ".agenticros/plugin-deploy/node_modules/@agenticros/object-detection/scripts/detect-person.mjs",
-    ),
-    path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "../../agenticros/packages/object-detection/scripts/detect-person.mjs",
-    ),
-    path.resolve(
-      path.dirname(fileURLToPath(import.meta.url)),
-      "../node_modules/@agenticros/object-detection/scripts/detect-person.mjs",
-    ),
+    // Built skill: dist/ -> ../scripts/
+    path.resolve(here, "../scripts/detect-person.mjs"),
+    // Source checkout (if ever imported from src/)
+    path.resolve(here, "../../scripts/detect-person.mjs"),
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
   }
   throw new Error(
-    `detect-person.mjs not found. Looked in plugin-deploy and workspace object-detection packages.`,
+    `detect-person.mjs not found next to this skill (expected scripts/detect-person.mjs).`,
   );
 }
 

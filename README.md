@@ -36,7 +36,7 @@ With `requirePerson` (default **true**), YOLO must see a person before depth can
 
 Still aim the RealSense so torsos are in the color frame and the candy bowl sits low or out of the depth image when you can. That keeps bowl/lens zones honest once a kid is close.
 
-Under OpenClaw, YOLO runs in a short-lived Node child (`object-detection/scripts/detect-person.mjs`) so `onnxruntime-node` / `sharp` load from `~/.agenticros/plugin-deploy` instead of OpenClaw's remapped native admissions. The gateway needs sharp's libvips on `LD_LIBRARY_PATH` (written into `~/.agenticros/gateway-ros.env` by `setup_gateway_plugin.sh`).
+Under OpenClaw, YOLO runs in a short-lived Node child (`scripts/detect-person.mjs` in this skill) so `onnxruntime-node` / `sharp` load from `~/.agenticros/plugin-deploy` (or a sibling AgenticROS checkout) instead of OpenClaw's remapped native admissions. The gateway needs sharp's libvips on `LD_LIBRARY_PATH` (written into `~/.agenticros/gateway-ros.env` by AgenticROS `setup_gateway_plugin.sh`).
 
 If YOLO cannot load, the skill logs a warning and falls back to depth-only. Set `requirePerson: false` to force that mode.
 
