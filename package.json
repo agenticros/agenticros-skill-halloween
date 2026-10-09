@@ -1,6 +1,6 @@
 {
   "name": "@agenticros/halloween",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Creep or Treat — a stationary AgenticROS porch host. YOLOv8n person detection plus RealSense depth/approach speed make the robot talk or scream while a candy bowl stays at its feet.",
   "keywords": [
