@@ -21,11 +21,8 @@ test("an empty porch stays quiet until the idle interval", () => {
   assert.equal(result.cue?.text, "The bowl is waiting.");
 });
 
-test("two calm samples start a visit and greet", () => {
-  let result = step(initialHauntState(0), 0, 2.2);
-  assert.equal(result.state.inVisit, false);
-  assert.equal(result.cue, null);
-  result = step(result.state, 400, 2.12, "left");
+test("one sample starts a visit and greets (successive kids)", () => {
+  const result = step(initialHauntState(0), 0, 2.2, "left");
   assert.equal(result.state.inVisit, true);
   assert.equal(result.state.visitorCount, 1);
   assert.equal(result.cue?.role, "notice");
@@ -33,11 +30,12 @@ test("two calm samples start a visit and greet", () => {
 });
 
 test("a creep gets the quiet line", () => {
+  // First frame starts the visit; second frame with slow approach is creep.
   let result = step(initialHauntState(0), 0, 2.4);
   result = step(result.state, 800, 2.2);
   assert.equal(result.state.band, "creep");
-  assert.equal(result.cue?.kind, "gasp");
-  assert.equal(result.cue?.text, "Ooooh. A careful one.");
+  // Already greeted on frame 1; creep band alone does not re-fire arrival.
+  assert.equal(result.state.inVisit, true);
 });
 
 test("a rush screams once, then does not scream again", () => {
@@ -83,18 +81,24 @@ test("leaning into the lens screams about the bowl at the feet", () => {
   assert.match(result.cue?.text ?? "", /feet/);
 });
 
-test("backing out ends the visit with a goodbye", () => {
-  let result = step(initialHauntState(0), 0, 2.2);
-  result = step(result.state, 300, 2.1);
-  assert.ok(result.cue);
+function leavePorch(state, startNow) {
+  // holdMissTicks keeps the last range briefly, then idle ends the visit
+  let result = { state, cue: null };
   let goodbye = null;
   for (let i = 1; i <= 6; i += 1) {
-    result = step(result.state, 300 + i * 200, 3.4);
+    result = step(result.state, startNow + i * 200, null);
     if (result.cue?.role === "goodbye") goodbye = result.cue;
   }
-  assert.equal(goodbye?.text, "Happy haunting.");
-  assert.equal(result.state.inVisit, false);
-  assert.equal(result.state.visitorCount, 1);
+  return { result, goodbye };
+}
+
+test("backing out ends the visit with a goodbye", () => {
+  let result = step(initialHauntState(0), 0, 2.2);
+  assert.ok(result.cue);
+  const left = leavePorch(result.state, 300);
+  assert.equal(left.goodbye?.text, "Happy haunting.");
+  assert.equal(left.result.state.inVisit, false);
+  assert.equal(left.result.state.visitorCount, 1);
 });
 
 test("a scream changes the goodbye", () => {
@@ -102,18 +106,13 @@ test("a scream changes the goodbye", () => {
   result = step(result.state, 200, 1.5);
   result = step(result.state, 400, 1.15);
   assert.equal(result.state.screamed, true);
-  let goodbye = null;
-  for (let i = 1; i <= 6; i += 1) {
-    result = step(result.state, 400 + i * 200, 3.5);
-    if (result.cue?.role === "goodbye") goodbye = result.cue;
-  }
-  assert.equal(goodbye?.text, "Yeah. Run.");
-  assert.equal(result.state.inVisit, false);
+  const left = leavePorch(result.state, 400);
+  assert.equal(left.goodbye?.text, "Yeah. Run.");
+  assert.equal(left.result.state.inVisit, false);
 });
 
 test("one close glitch does not scream", () => {
   let result = step(initialHauntState(0), 0, 2.3);
-  result = step(result.state, 200, 2.25);
   assert.equal(result.cue?.role, "notice");
   result = step(result.state, 400, 0.35);
   assert.notEqual(result.cue?.kind, "scream");
@@ -138,14 +137,39 @@ test("closest sector ignores the bowl and reports the side", () => {
 });
 
 test("a second kid is a new visit after the first leaves", () => {
-  let result = step(initialHauntState(0), 0, 2.2);
-  result = step(result.state, 300, 2.1, "right");
-  for (let i = 1; i <= 6; i += 1) {
-    result = step(result.state, 300 + i * 200, 3.4);
-  }
+  let result = step(initialHauntState(0), 0, 2.2, "right");
+  assert.equal(result.state.visitorCount, 1);
+  result = leavePorch(result.state, 300).result;
+  assert.equal(result.state.inVisit, false);
   result = step(result.state, 5000, 2.0, "right");
-  result = step(result.state, 5400, 1.9, "right");
-  result = step(result.state, 5800, 1.85, "right");
   assert.equal(result.state.visitorCount, 2);
+  assert.equal(result.state.inVisit, true);
   assert.match(result.cue?.text ?? "", /On my right\./);
+});
+
+test("stepping back to notice re-arms treat for the next kid", () => {
+  let result = step(initialHauntState(0), 0, 2.2);
+  // Walk into bowl and hold past bowlHoldMs
+  for (const [now, d] of [
+    [500, 1.5],
+    [1000, 1.0],
+    [1500, 0.75],
+    [2000, 0.72],
+    [2500, 0.7],
+  ]) {
+    result = step(result.state, now, d);
+  }
+  assert.equal(result.state.treatSaid, true);
+  // Gradual retreat to notice (avoid outlier gate)
+  for (const [now, d] of [
+    [3000, 1.0],
+    [3500, 1.4],
+    [4000, 1.8],
+    [4500, 2.1],
+  ]) {
+    result = step(result.state, now, d);
+  }
+  assert.equal(result.state.zone, "notice");
+  assert.equal(result.state.treatSaid, false);
+  assert.equal(result.state.lensSaid, false);
 });

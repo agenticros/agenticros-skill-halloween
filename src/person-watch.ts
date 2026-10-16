@@ -3,9 +3,9 @@
  * Subscribes to a CompressedImage/Image topic and runs detection at personHz.
  *
  * Under OpenClaw, in-process onnxruntime-node/sharp are remapped to other
- * plugins' native admissions and fail. Detection runs in a short-lived Node
- * child (scripts/detect-person.mjs) that loads plugin-deploy / monorepo
- * @agenticros/object-detection with a clean module graph.
+ * plugins' native admissions and fail. Detection runs in a long-lived Node
+ * child (scripts/detect-person.mjs --serve) that loads the model once outside
+ * OpenClaw's remap, then accepts length-prefixed frames over stdin.
  */
 
 import { spawn } from "node:child_process";
@@ -178,15 +178,97 @@ class SubprocessPersonDetector implements Detector {
   private script = "";
   private scoreThreshold: number;
   private skillRoot?: string;
+  /** Long-lived --serve worker; model loads once instead of every frame. */
+  private child: ReturnType<typeof spawn> | null = null;
+  private stdoutBuf = Buffer.alloc(0);
+  private lineWaiters: Array<{
+    resolve: (line: string) => void;
+    reject: (err: Error) => void;
+  }> = [];
+  private queue: Promise<unknown> = Promise.resolve();
 
   constructor(opts?: { scoreThreshold?: number; skillRoot?: string }) {
     this.scoreThreshold = opts?.scoreThreshold ?? 0.4;
     this.skillRoot = opts?.skillRoot;
   }
 
+  private buildEnv(): NodeJS.ProcessEnv {
+    const vips = sharpLibvipsDir();
+    const env = { ...process.env };
+    if (vips) {
+      env["LD_LIBRARY_PATH"] = `${vips}${env["LD_LIBRARY_PATH"] ? `:${env["LD_LIBRARY_PATH"]}` : ""}`;
+    }
+    // Child must not inherit OpenClaw service marker quirks; keep a clean node.
+    delete env["NODE_OPTIONS"];
+    return env;
+  }
+
+  private ensureChild(): ReturnType<typeof spawn> {
+    if (this.child && !this.child.killed) return this.child;
+    const script = this.script || findDetectScript(this.skillRoot);
+    const child = spawn(
+      process.execPath,
+      [script, "--serve", "--score", String(this.scoreThreshold)],
+      { env: this.buildEnv(), stdio: ["pipe", "pipe", "pipe"] },
+    );
+    this.child = child;
+    this.stdoutBuf = Buffer.alloc(0);
+    child.stdout?.on("data", (chunk: Buffer) => {
+      this.stdoutBuf = Buffer.concat([this.stdoutBuf, chunk]);
+      for (;;) {
+        const nl = this.stdoutBuf.indexOf(0x0a);
+        if (nl < 0) break;
+        const line = this.stdoutBuf.subarray(0, nl).toString("utf8");
+        this.stdoutBuf = this.stdoutBuf.subarray(nl + 1);
+        const waiter = this.lineWaiters.shift();
+        if (waiter) waiter.resolve(line);
+      }
+    });
+    const failWaiters = (err: Error) => {
+      const pending = this.lineWaiters.splice(0);
+      for (const w of pending) w.reject(err);
+    };
+    child.on("error", (err) => {
+      this.child = null;
+      failWaiters(err instanceof Error ? err : new Error(String(err)));
+    });
+    child.on("close", (code) => {
+      this.child = null;
+      failWaiters(new Error(`detect-person --serve exited ${code}`));
+    });
+    return child;
+  }
+
+  private readLine(timeoutMs = 30_000): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const idx = this.lineWaiters.findIndex((w) => w.resolve === resolveWrapped);
+        if (idx >= 0) this.lineWaiters.splice(idx, 1);
+        reject(new Error("detect-person --serve timed out waiting for response"));
+      }, timeoutMs);
+      const resolveWrapped = (line: string) => {
+        clearTimeout(timer);
+        resolve(line);
+      };
+      const rejectWrapped = (err: Error) => {
+        clearTimeout(timer);
+        reject(err);
+      };
+      this.lineWaiters.push({ resolve: resolveWrapped, reject: rejectWrapped });
+    });
+  }
+
   async load(): Promise<void> {
     this.script = findDetectScript(this.skillRoot);
-    // Warm model + verify natives outside OpenClaw's remap.
+    const child = this.ensureChild();
+    const readyLine = await this.readLine(120_000);
+    const ready = JSON.parse(readyLine) as { ready?: boolean; error?: string };
+    if (!ready.ready) {
+      child.kill("SIGTERM");
+      this.child = null;
+      throw new Error(`detect-person --serve failed to ready: ${readyLine.slice(0, 200)}`);
+    }
+    // Smoke one inference so the first live frame is not the cold path.
     await this.detect(TINY_JPEG);
   }
 
@@ -195,47 +277,69 @@ class SubprocessPersonDetector implements Detector {
     height: number;
     persons: PersonDetection[];
   }> {
-    const script = this.script || findDetectScript(this.skillRoot);
-    const vips = sharpLibvipsDir();
-    const env = { ...process.env };
-    if (vips) {
-      env["LD_LIBRARY_PATH"] = `${vips}${env["LD_LIBRARY_PATH"] ? `:${env["LD_LIBRARY_PATH"]}` : ""}`;
-    }
-    // Child must not inherit OpenClaw service marker quirks; keep a clean node.
-    delete env["NODE_OPTIONS"];
-
     const buf = Buffer.isBuffer(image) ? image : Buffer.from(image);
-    const stdout = await new Promise<Buffer>((resolve, reject) => {
-      const child = spawn(
-        process.execPath,
-        [script, "--score", String(this.scoreThreshold)],
-        { env, stdio: ["pipe", "pipe", "pipe"] },
-      );
-      const out: Buffer[] = [];
-      const err: Buffer[] = [];
-      child.stdout.on("data", (c: Buffer) => out.push(c));
-      child.stderr.on("data", (c: Buffer) => err.push(c));
-      child.on("error", reject);
-      child.on("close", (code) => {
-        if (code === 0) resolve(Buffer.concat(out));
-        else {
-          reject(
-            new Error(
-              `detect-person exited ${code}: ${Buffer.concat(err).toString("utf8").slice(0, 400)}`,
-            ),
-          );
-        }
-      });
-      child.stdin.write(buf);
-      child.stdin.end();
-    });
+    if (buf.length === 0) {
+      return { width: 0, height: 0, persons: [] };
+    }
 
-    const parsed = JSON.parse(stdout.toString("utf8")) as {
-      width: number;
-      height: number;
-      persons: PersonDetection[];
+    const run = async () => {
+      const child = this.ensureChild();
+      if (!child.stdin) throw new Error("detect-person stdin missing");
+      const header = Buffer.alloc(4);
+      header.writeUInt32BE(buf.length, 0);
+      const ok = child.stdin.write(header) && child.stdin.write(buf);
+      if (!ok) {
+        await new Promise<void>((resolve) => child.stdin!.once("drain", resolve));
+      }
+      const line = await this.readLine(30_000);
+      const parsed = JSON.parse(line) as {
+        width: number;
+        height: number;
+        persons: PersonDetection[];
+        error?: string;
+        ready?: boolean;
+      };
+      if (parsed.ready) {
+        // Spurious ready after restart — read the real response.
+        return this.detect(buf);
+      }
+      if (parsed.error && (!parsed.persons || parsed.persons.length === 0) && parsed.width === 0) {
+        throw new Error(parsed.error);
+      }
+      return parsed;
     };
-    return parsed;
+
+    // Serialize frames so one worker never interleaves requests.
+    const next = this.queue.then(run, run);
+    this.queue = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  }
+
+  async dispose(): Promise<void> {
+    const child = this.child;
+    this.child = null;
+    if (!child) return;
+    try {
+      if (child.stdin && !child.killed) {
+        const header = Buffer.alloc(4);
+        header.writeUInt32BE(0, 0);
+        child.stdin.write(header);
+        child.stdin.end();
+      }
+    } catch {
+      // ignore
+    }
+    child.kill("SIGTERM");
+    await new Promise<void>((resolve) => {
+      const t = setTimeout(resolve, 1000);
+      child.once("close", () => {
+        clearTimeout(t);
+        resolve();
+      });
+    });
   }
 }
 
@@ -344,6 +448,12 @@ export class PersonWatch {
     if (this.detecting || !this.detector) return;
     const frame = this.latest;
     if (!frame || Date.now() - frame.at > 2500) {
+      this.noteMiss();
+      return;
+    }
+    // Empty/corrupt CompressedImage payloads crash sharp; treat as a miss.
+    if (!frame.buffer.length) {
+      this.lastError = "empty camera frame";
       this.noteMiss();
       return;
     }

@@ -6,15 +6,17 @@ export interface LineBook {
   notice(band: VoiceBand, side: Side | null, rand: () => number): string;
   rush(rand: () => number): string;
   bowlArrive(rand: () => number): string;
-  treat(screamed: boolean, rand: () => number): string;
-  lens(rand: () => number): string;
+  treat(screamed: boolean, rand: () => number, avoid?: string): string;
+  lens(rand: () => number, avoid?: string): string;
   goodbye(screamed: boolean, rand: () => number): string;
   idle(rand: () => number): string;
 }
 
-function pick(items: readonly string[], rand: () => number): string {
-  const index = Math.min(items.length - 1, Math.max(0, Math.floor(rand() * items.length)));
-  return items[index] ?? items[0] ?? "";
+function pick(items: readonly string[], rand: () => number, avoid?: string): string {
+  const pool = avoid && items.length > 1 ? items.filter((line) => line !== avoid) : items;
+  const list = pool.length > 0 ? pool : items;
+  const index = Math.min(list.length - 1, Math.max(0, Math.floor(rand() * list.length)));
+  return list[index] ?? list[0] ?? "";
 }
 
 function withSide(line: string, side: Side | null): string {
@@ -49,7 +51,13 @@ const TREAT = [
   "There it is. Take one.",
 ];
 
-const TREAT_AFTER_SCREAM = ["Alright. Take one. Slowly.", "Fine. One piece. No grabbing."];
+const TREAT_AFTER_SCREAM = [
+  "Alright. Take one. Slowly.",
+  "Fine. One piece. No grabbing.",
+  "Easy. The bowl is at my feet.",
+  "One candy. Then step back.",
+  "You've been warned. Take one.",
+];
 
 const LENS = [
   "The candy is at my feet, not my face!",
@@ -79,11 +87,11 @@ export const halloweenLines: LineBook = {
   bowlArrive(rand) {
     return pick(BOWL_ARRIVE, rand);
   },
-  treat(screamed, rand) {
-    return pick(screamed ? TREAT_AFTER_SCREAM : TREAT, rand);
+  treat(screamed, rand, avoid) {
+    return pick(screamed ? TREAT_AFTER_SCREAM : TREAT, rand, avoid);
   },
-  lens(rand) {
-    return pick(LENS, rand);
+  lens(rand, avoid) {
+    return pick(LENS, rand, avoid);
   },
   goodbye(screamed, rand) {
     return pick(screamed ? GOODBYE_AFTER_SCREAM : GOODBYE, rand);

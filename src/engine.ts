@@ -36,6 +36,8 @@ export interface HauntState {
   inVisit: boolean;
   screamed: boolean;
   treatSaid: boolean;
+  /** Extra bowl nags after the first treat line (capped by bowlChatMax). */
+  bowlChatCount: number;
   lensSaid: boolean;
   spoke: boolean;
   lastSpokenAt: number;
@@ -72,6 +74,7 @@ export function initialHauntState(now = 0): HauntState {
     inVisit: false,
     screamed: false,
     treatSaid: false,
+    bowlChatCount: 0,
     lensSaid: false,
     spoke: false,
     lastSpokenAt: 0,
@@ -152,6 +155,7 @@ function endVisit(state: HauntState, now: number): HauntState {
     inVisit: false,
     screamed: false,
     treatSaid: false,
+    bowlChatCount: 0,
     lensSaid: false,
     spoke: false,
     zone: "idle",
@@ -176,7 +180,10 @@ function applyCue(state: HauntState, cue: SpeechCue, now: number): HauntState {
   };
   if (cue.kind === "scream" || cue.role === "rush" || cue.role === "lens") next.screamed = true;
   if (cue.role === "lens") next.lensSaid = true;
-  if (cue.role === "treat") next.treatSaid = true;
+  if (cue.role === "treat") {
+    if (state.treatSaid) next.bowlChatCount = state.bowlChatCount + 1;
+    next.treatSaid = true;
+  }
   if (cue.role === "idle") next.lastIdleAt = now;
   return next;
 }
@@ -290,13 +297,20 @@ export function tickHaunt(
         next.visitorCount = state.visitorCount + 1;
         next.screamed = false;
         next.treatSaid = false;
+        next.bowlChatCount = 0;
         next.lensSaid = false;
         next.spoke = false;
         next.bowlSince = zone === "bowl" ? now : null;
         cue = arrivalCue(zone, band, next.side, lines, rand);
       }
     } else if (zone === "lens" && !state.lensSaid) {
-      cue = { role: "lens", kind: "scream", text: lines.lens(rand), band: "rush", priority: true };
+      cue = {
+        role: "lens",
+        kind: "scream",
+        text: lines.lens(rand, state.lastLine),
+        band: "rush",
+        priority: true,
+      };
     } else if (band === "rush" && !state.screamed) {
       cue = { role: "rush", kind: "scream", text: lines.rush(rand), band: "rush", priority: true };
     } else if (zone === "bowl" && !state.treatSaid) {
@@ -306,13 +320,36 @@ export function tickHaunt(
         cue = {
           role: "treat",
           kind: "say",
-          text: lines.treat(state.screamed, rand),
+          text: lines.treat(state.screamed, rand, state.lastLine),
           band: band === "creep" ? "creep" : "walk",
           priority: false,
         };
       }
-    } else if (zone !== "bowl") {
+    } else if (
+      zone === "bowl" &&
+      state.treatSaid &&
+      band !== "rush" &&
+      state.bowlChatCount < tuning.bowlChatMax &&
+      now - state.lastSpokenAt >= tuning.bowlChatMs
+    ) {
+      // Groups lingering at the bowl — keep talking with fresh lines.
+      cue = {
+        role: "treat",
+        kind: "say",
+        text: lines.treat(state.screamed, rand, state.lastLine),
+        band: band === "creep" ? "creep" : "walk",
+        priority: false,
+      };
+    } else if (zone === "closing") {
       next.bowlSince = null;
+      // bowl↔closing flicker must not re-arm (that spams). Stay armed for bowlChat.
+    } else if (zone === "notice") {
+      next.bowlSince = null;
+      // Next kid in line stepped back to notice — full re-arm, no lockout.
+      next.treatSaid = false;
+      next.bowlChatCount = 0;
+      next.lensSaid = false;
+      next.screamed = false;
     }
   }
 

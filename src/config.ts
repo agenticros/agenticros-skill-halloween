@@ -21,6 +21,10 @@ export interface HauntTuning {
   bowlHoldMs: number;
   /** Minimum gap between ordinary lines. Screams ignore this. */
   cooldownMs: number;
+  /** While a visitor stays in the bowl after the treat line, re-prompt this often. */
+  bowlChatMs: number;
+  /** Max extra bowl lines per visit (after the first treat). 0 disables. */
+  bowlChatMax: number;
   /** How often to mutter when nobody is there. */
   idleIntervalMs: number;
   /** Extra meters required before a zone is allowed to step farther away. */
@@ -73,13 +77,19 @@ export const DEFAULT_TUNING: HauntTuning = {
   creepMaxMps: 0.25,
   rushMinMps: 0.6,
   stillMaxMps: 0.1,
-  bowlHoldMs: 1000,
-  cooldownMs: 2500,
-  idleIntervalMs: 35000,
+  bowlHoldMs: 500,
+  /** Always 0 — successive kids must never wait on a speech cooldown. */
+  cooldownMs: 0,
+  /** Spacing between bowl lines for a lingering group (not a lockout). */
+  bowlChatMs: 8000,
+  /** High cap so groups keep getting lines; visit reset clears the counter. */
+  bowlChatMax: 50,
+  idleIntervalMs: 12000,
   hysteresisM: 0.15,
-  idleTicksToEndVisit: 3,
-  holdMissTicks: 3,
-  samplesToArrive: 2,
+  /** End a visit as soon as the porch looks empty so the next kid is greeted. */
+  idleTicksToEndVisit: 1,
+  holdMissTicks: 2,
+  samplesToArrive: 1,
   outlierGateM: 1.0,
 };
 
@@ -140,6 +150,8 @@ export function getHalloweenConfig(skillsSlice: unknown): HalloweenConfig {
     stillMaxMps: num(source, "stillMaxMps", DEFAULTS.stillMaxMps),
     bowlHoldMs: num(source, "bowlHoldMs", DEFAULTS.bowlHoldMs),
     cooldownMs: num(source, "cooldownMs", DEFAULTS.cooldownMs),
+    bowlChatMs: num(source, "bowlChatMs", DEFAULTS.bowlChatMs),
+    bowlChatMax: num(source, "bowlChatMax", DEFAULTS.bowlChatMax),
     idleIntervalMs: num(source, "idleIntervalMs", DEFAULTS.idleIntervalMs),
     hysteresisM: num(source, "hysteresisM", DEFAULTS.hysteresisM),
     idleTicksToEndVisit: num(source, "idleTicksToEndVisit", DEFAULTS.idleTicksToEndVisit),
@@ -159,6 +171,10 @@ export function getHalloweenConfig(skillsSlice: unknown): HalloweenConfig {
   config.samplesToArrive = Math.max(1, Math.round(config.samplesToArrive));
   config.idleTicksToEndVisit = Math.max(1, Math.round(config.idleTicksToEndVisit));
   config.holdMissTicks = Math.max(0, Math.round(config.holdMissTicks));
+  config.cooldownMs = 0; // porch traffic never waits on cooldown
+  config.bowlChatMs = Math.max(3000, config.bowlChatMs);
+  config.bowlChatMax = Math.max(0, Math.round(config.bowlChatMax));
+  config.idleIntervalMs = Math.max(1000, config.idleIntervalMs);
 
   const zonesOk =
     config.noticeM > config.closingM &&
